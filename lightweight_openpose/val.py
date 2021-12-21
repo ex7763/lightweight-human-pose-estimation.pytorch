@@ -8,10 +8,10 @@ from pycocotools.cocoeval import COCOeval
 
 import torch
 
-from datasets.coco import CocoValDataset
-from models.with_mobilenet import PoseEstimationWithMobileNet
-from modules.keypoints import extract_keypoints, group_keypoints
-from modules.load_state import load_state
+from lightweight_openpose.datasets.coco import CocoValDataset
+from lightweight_openpose.models.with_mobilenet import PoseEstimationWithMobileNet
+from lightweight_openpose.modules.keypoints import extract_keypoints, group_keypoints
+from lightweight_openpose.modules.load_state import load_state
 
 
 def run_coco_eval(gt_file_path, dt_file_path):
