@@ -1,4 +1,5 @@
 import argparse
+import time
 
 import cv2
 import numpy as np
@@ -78,7 +79,31 @@ def infer_fast(net, img, net_input_height_size, stride, upsample_ratio, cpu,
     return heatmaps, pafs, scale, pad
 
 
-def run_demo(net, image_provider, height_size, cpu, track, smooth):
+def pose_detection(pose):
+    #print(Pose.num_kpts)
+    #print(Pose.kpt_names)
+    #print(pose.keypoints)
+    pose_dict = {}
+    for i in range(len(pose.keypoints)):
+        print(Pose.kpt_names[i], pose.keypoints[i])
+        pose_dict[Pose.kpt_names[i]] = pose.keypoints[i]
+
+    if pose_dict['l_wri'][1] < pose_dict['l_elb'][1] \
+            and pose_dict['l_elb'][1] < pose_dict['l_sho'][1]:
+        print('\tDETECT: Raise Hand (Left)')
+        return 'l_raise_hand'
+
+    elif pose_dict['r_wri'][1] < pose_dict['r_elb'][1] \
+            and pose_dict['r_elb'][1] < pose_dict['r_sho'][1]:
+        print('\tDETECT: Raise Hand (Right)')
+        return 'r_raise_hand'
+
+    else:
+        return None
+
+
+
+def run_demo(net, image_provider, height_size, cpu, track, smooth, confidence_thres=14.):
     net = net.eval()
     if not cpu:
         net = net.cuda()
@@ -87,8 +112,11 @@ def run_demo(net, image_provider, height_size, cpu, track, smooth):
     upsample_ratio = 4
     num_keypoints = Pose.num_kpts
     previous_poses = []
-    delay = 10
+    delay = 10000
+    count = 0
     for img in image_provider:
+        t = time.monotonic()
+
         orig_img = img.copy()
         heatmaps, pafs, scale, pad = infer_fast(net, img, height_size, stride, upsample_ratio, cpu)
 
@@ -102,6 +130,9 @@ def run_demo(net, image_provider, height_size, cpu, track, smooth):
             all_keypoints[kpt_id, 0] = (all_keypoints[kpt_id, 0] * stride / upsample_ratio - pad[1]) / scale
             all_keypoints[kpt_id, 1] = (all_keypoints[kpt_id, 1] * stride / upsample_ratio - pad[0]) / scale
         current_poses = []
+
+        print(pose_entries)
+        #print(all_keypoints)
         for n in range(len(pose_entries)):
             if len(pose_entries[n]) == 0:
                 continue
@@ -117,15 +148,34 @@ def run_demo(net, image_provider, height_size, cpu, track, smooth):
             track_poses(previous_poses, current_poses, smooth=smooth)
             previous_poses = current_poses
         for pose in current_poses:
-            pose.draw(img)
+            print('confidence', pose.confidence)
+            if pose.confidence > confidence_thres:
+                pose.draw(img)
+                ret = pose_detection(pose) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                if ret is not None:
+                    shape = img.shape
+                    print(shape)
+                    cv2.putText(img, f'{ret}', (0, shape[0]), \
+                                cv2.FONT_HERSHEY_PLAIN, 4, (0, 0, 255), 3, cv2.LINE_AA)
+
         img = cv2.addWeighted(orig_img, 0.6, img, 0.4, 0)
         for pose in current_poses:
-            cv2.rectangle(img, (pose.bbox[0], pose.bbox[1]),
-                          (pose.bbox[0] + pose.bbox[2], pose.bbox[1] + pose.bbox[3]), (0, 255, 0))
-            if track:
-                cv2.putText(img, 'id: {}'.format(pose.id), (pose.bbox[0], pose.bbox[1] - 16),
-                            cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255))
+            if pose.confidence > confidence_thres:
+                cv2.rectangle(img, (pose.bbox[0], pose.bbox[1]),
+                              (pose.bbox[0] + pose.bbox[2], pose.bbox[1] + pose.bbox[3]), (0, 255, 0))
+                if track:
+                    cv2.putText(img, 'id: {}'.format(pose.id), (pose.bbox[0], pose.bbox[1] - 16),
+                                cv2.FONT_HERSHEY_PLAIN, 0.5, (0, 0, 255))
+
+        t = time.monotonic() - t
+
+        print(f"fps: {1/t}")
+        cv2.putText(img, f'fps: {1/t:.0f}', (0, 16), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2, cv2.LINE_AA)
+
         cv2.imshow('Lightweight Human Pose Estimation Python Demo', img)
+        cv2.imwrite(f'out/{count:06d}.jpg', img)
+        count += 1
         key = cv2.waitKey(delay)
         if key == 27:  # esc
             return

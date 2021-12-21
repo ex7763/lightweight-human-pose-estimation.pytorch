@@ -51,11 +51,15 @@ class Pose:
             kpt_a_id = BODY_PARTS_KPT_IDS[part_id][0]
             global_kpt_a_id = self.keypoints[kpt_a_id, 0]
             if global_kpt_a_id != -1:
+                #print(Pose.kpt_names[kpt_a_id], self.keypoints[kpt_a_id])
                 x_a, y_a = self.keypoints[kpt_a_id]
                 cv2.circle(img, (int(x_a), int(y_a)), 3, Pose.color, -1)
             kpt_b_id = BODY_PARTS_KPT_IDS[part_id][1]
             global_kpt_b_id = self.keypoints[kpt_b_id, 0]
             if global_kpt_b_id != -1:
+                print(Pose.kpt_names[kpt_b_id], self.keypoints[kpt_b_id])
+                cv2.putText(img, Pose.kpt_names[kpt_b_id], self.keypoints[kpt_b_id], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3, cv2.LINE_AA)
+
                 x_b, y_b = self.keypoints[kpt_b_id]
                 cv2.circle(img, (int(x_b), int(y_b)), 3, Pose.color, -1)
             if global_kpt_a_id != -1 and global_kpt_b_id != -1:
