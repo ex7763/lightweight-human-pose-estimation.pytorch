@@ -57,7 +57,7 @@ class Pose:
             kpt_b_id = BODY_PARTS_KPT_IDS[part_id][1]
             global_kpt_b_id = self.keypoints[kpt_b_id, 0]
             if global_kpt_b_id != -1:
-                print(Pose.kpt_names[kpt_b_id], self.keypoints[kpt_b_id])
+                #print(Pose.kpt_names[kpt_b_id], self.keypoints[kpt_b_id])
                 cv2.putText(img, Pose.kpt_names[kpt_b_id], self.keypoints[kpt_b_id], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3, cv2.LINE_AA)
 
                 x_b, y_b = self.keypoints[kpt_b_id]

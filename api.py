@@ -85,7 +85,7 @@ def pose_detection(pose):
     #print(pose.keypoints)
     pose_dict = {}
     for i in range(len(pose.keypoints)):
-        print(Pose.kpt_names[i], pose.keypoints[i])
+        #print(Pose.kpt_names[i], pose.keypoints[i])
         pose_dict[Pose.kpt_names[i]] = pose.keypoints[i]
 
     if pose_dict['l_wri'][1] < pose_dict['l_elb'][1] \
@@ -186,31 +186,112 @@ def run_demo(net, image_provider, height_size, cpu, track, smooth, confidence_th
                 delay = 1
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='''Lightweight human pose estimation python demo.
-                       This is just for quick results preview.
-                       Please, consider c++ demo for the best performance.''')
-    parser.add_argument('--checkpoint-path', type=str, required=True, help='path to the checkpoint')
-    parser.add_argument('--height-size', type=int, default=256, help='network input layer height size')
-    parser.add_argument('--video', type=str, default='', help='path to video file or camera id')
-    parser.add_argument('--images', nargs='+', default='', help='path to input image(s)')
-    parser.add_argument('--cpu', action='store_true', help='run network inference on cpu')
-    parser.add_argument('--track', type=int, default=1, help='track pose id in video')
-    parser.add_argument('--smooth', type=int, default=1, help='smooth pose keypoints')
-    args = parser.parse_args()
-
-    if args.video == '' and args.images == '':
-        raise ValueError('Either --video or --image has to be provided')
-
+def get_pose_estimation_net(checkpoint_path):
     net = PoseEstimationWithMobileNet()
-    checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
     load_state(net, checkpoint)
 
-    frame_provider = ImageReader(args.images)
-    if args.video != '':
-        frame_provider = VideoReader(args.video)
-    else:
-        args.track = 0
+    return net
 
-    run_demo(net, frame_provider, args.height_size, args.cpu, args.track, args.smooth)
+def get_pose(net, img, height_size=256, cpu=True, confidence_thres=14.):
+    net = net.eval()
+    if not cpu:
+        net = net.cuda()
+
+    stride = 8
+    upsample_ratio = 4
+    num_keypoints = Pose.num_kpts
+    previous_poses = []
+
+    t = time.monotonic()
+
+    orig_img = img.copy()
+    heatmaps, pafs, scale, pad = infer_fast(net, img, height_size, stride, upsample_ratio, cpu)
+
+    total_keypoints_num = 0
+    all_keypoints_by_type = []
+    for kpt_idx in range(num_keypoints):  # 19th for bg
+        total_keypoints_num += extract_keypoints(heatmaps[:, :, kpt_idx], all_keypoints_by_type, total_keypoints_num)
+
+    pose_entries, all_keypoints = group_keypoints(all_keypoints_by_type, pafs)
+    for kpt_id in range(all_keypoints.shape[0]):
+        all_keypoints[kpt_id, 0] = (all_keypoints[kpt_id, 0] * stride / upsample_ratio - pad[1]) / scale
+        all_keypoints[kpt_id, 1] = (all_keypoints[kpt_id, 1] * stride / upsample_ratio - pad[0]) / scale
+    current_poses = []
+
+    #print(pose_entries)
+    #print(all_keypoints)
+    for n in range(len(pose_entries)):
+        if len(pose_entries[n]) == 0:
+            continue
+        pose_keypoints = np.ones((num_keypoints, 2), dtype=np.int32) * -1
+        for kpt_id in range(num_keypoints):
+            if pose_entries[n][kpt_id] != -1.0:  # keypoint was found
+                pose_keypoints[kpt_id, 0] = int(all_keypoints[int(pose_entries[n][kpt_id]), 0])
+                pose_keypoints[kpt_id, 1] = int(all_keypoints[int(pose_entries[n][kpt_id]), 1])
+        pose = Pose(pose_keypoints, pose_entries[n][18])
+        current_poses.append(pose)
+
+    for pose in current_poses:
+        #print('confidence', pose.confidence)
+        if pose.confidence > confidence_thres:
+            pose.draw(img)
+            pose_name = pose_detection(pose) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    img = cv2.addWeighted(orig_img, 0.6, img, 0.4, 0)
+    for pose in current_poses:
+        if pose.confidence > confidence_thres:
+            cv2.rectangle(img, (pose.bbox[0], pose.bbox[1]),
+                          (pose.bbox[0] + pose.bbox[2], pose.bbox[1] + pose.bbox[3]), (0, 255, 0))
+
+    t = time.monotonic() - t
+    #print(f"fps: {1/t}")
+
+    return img, pose_name
+
+def test():
+    input_path = 'test_images/000193.jpg'
+    checkpoint_path = 'checkpoint_iter_370000.pth'
+    result_path = 'result.jpg'
+    img = cv2.imread(input_path)
+    net = get_pose_estimation_net(checkpoint_path=checkpoint_path)
+    result, pose_name = get_pose(net, img, cpu=True)
+
+    print(f"input image path: {input_path}")
+    print(f"checkpoint path: {checkpoint_path}")
+    print(f"pose_name: {pose_name}")
+    print(f"result: {result_path}")
+    cv2.imwrite(result_path, result)
+
+
+if __name__ == '__main__':
+    if True:
+        test()
+    else:
+        parser = argparse.ArgumentParser(
+            description='''Lightweight human pose estimation python demo.
+                           This is just for quick results preview.
+                           Please, consider c++ demo for the best performance.''')
+        parser.add_argument('--checkpoint-path', type=str, required=True, help='path to the checkpoint')
+        parser.add_argument('--height-size', type=int, default=256, help='network input layer height size')
+        parser.add_argument('--video', type=str, default='', help='path to video file or camera id')
+        parser.add_argument('--images', nargs='+', default='', help='path to input image(s)')
+        parser.add_argument('--cpu', action='store_true', help='run network inference on cpu')
+        parser.add_argument('--track', type=int, default=1, help='track pose id in video')
+        parser.add_argument('--smooth', type=int, default=1, help='smooth pose keypoints')
+        args = parser.parse_args()
+
+        if args.video == '' and args.images == '':
+            raise ValueError('Either --video or --image has to be provided')
+
+        net = PoseEstimationWithMobileNet()
+        checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
+        load_state(net, checkpoint)
+
+        frame_provider = ImageReader(args.images)
+        if args.video != '':
+            frame_provider = VideoReader(args.video)
+        else:
+            args.track = 0
+
+        run_demo(net, frame_provider, args.height_size, args.cpu, args.track, args.smooth)
